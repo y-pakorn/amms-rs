@@ -1,0 +1,11 @@
+use indicatif::ProgressStyle;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
+        .template("{spinner:.blue} {msg}")
+        .unwrap();
+    pub static ref SYNC_BAR_STYLE: ProgressStyle = ProgressStyle::default_spinner()
+        .template("{msg} {bar:40.cyan/blue} {pos:>7}/{len:7}")
+        .unwrap();
+}
