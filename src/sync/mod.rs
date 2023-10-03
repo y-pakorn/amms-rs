@@ -1,6 +1,6 @@
 use crate::{
     amm::{
-        factory::{AutomatedMarketMakerFactory, Factory},
+        factory::{AutomatedMarketMakerFactory, Factory, TASK_LIMIT},
         uniswap_v2, uniswap_v3, AutomatedMarketMaker, AMM,
     },
     constants::{MULTIPROGRESS, SPINNER_STYLE, SYNC_BAR_STYLE},
@@ -117,7 +117,11 @@ pub async fn populate_amms<M: 'static + Middleware>(
             .with_style(SYNC_BAR_STYLE.clone())
             .with_message(format!("Populating pools data from: {}", address)),
     );
+    progress.tick();
+
     let mut handles = JoinSet::new();
+    let mut updated_amms = vec![];
+
     if amms_are_congruent(amms) {
         match amms[0] {
             AMM::UniswapV2Pool(_) => {
@@ -135,6 +139,11 @@ pub async fn populate_amms<M: 'static + Middleware>(
                         progress.inc(amm_chunk.len() as u64);
                         Ok::<_, AMMError<M>>(amm_chunk)
                     });
+
+                    if handles.len() == TASK_LIMIT {
+                        process_updated_amm(&mut updated_amms, handles).await?;
+                        handles = JoinSet::new();
+                    }
                 }
             }
 
@@ -154,6 +163,11 @@ pub async fn populate_amms<M: 'static + Middleware>(
                         progress.inc(amm_chunk.len() as u64);
                         Ok::<_, AMMError<M>>(amm_chunk)
                     });
+
+                    if handles.len() == TASK_LIMIT {
+                        process_updated_amm(&mut updated_amms, handles).await?;
+                        handles = JoinSet::new();
+                    }
                 }
             }
 
@@ -172,17 +186,23 @@ pub async fn populate_amms<M: 'static + Middleware>(
             }
         };
 
-        let mut updated_amms = vec![];
-        while let Some(amm_chunk) = handles.join_next().await {
-            updated_amms.extend(amm_chunk??);
-        }
-
+        process_updated_amm(&mut updated_amms, handles).await?;
         progress.finish_and_clear();
 
         Ok(updated_amms)
     } else {
         return Err(AMMError::IncongruentAMMs);
     }
+}
+
+pub async fn process_updated_amm<M: 'static + Middleware>(
+    amms: &mut Vec<AMM>,
+    mut set: JoinSet<Result<Vec<AMM>, AMMError<M>>>,
+) -> Result<(), AMMError<M>> {
+    while let Some(amm_chunk) = set.join_next().await {
+        amms.extend(amm_chunk??);
+    }
+    Ok(())
 }
 
 pub fn remove_empty_amms(amms: Vec<AMM>) -> Vec<AMM> {
