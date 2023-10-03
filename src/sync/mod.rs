@@ -10,6 +10,7 @@ use crate::{
 use ethers::providers::Middleware;
 use indicatif::ProgressBar;
 use std::{panic::resume_unwind, sync::Arc, time::Duration};
+use tokio::task::JoinSet;
 
 pub mod checkpoint;
 
@@ -34,19 +35,20 @@ pub async fn sync_amms<M: 'static + Middleware>(
 
     //Aggregate the populated pools from each thread
     let mut aggregated_amms: Vec<AMM> = vec![];
-    let mut handles = vec![];
+    let mut handles = JoinSet::new();
 
     //For each dex supplied, get all pair created events and get reserve values
     for factory in factories.clone() {
         let middleware = middleware.clone();
 
         //Spawn a new thread to get all pools and sync data for each dex
-        handles.push(tokio::spawn(async move {
+        handles.spawn(async move {
             let factory_spinner = MULTIPROGRESS.add(
                 ProgressBar::new_spinner()
                     .with_style(SPINNER_STYLE.clone())
                     .with_message(format!("Getting all pools from: {}", factory.address())),
             );
+            factory_spinner.enable_steady_tick(Duration::from_millis(200));
             //Get all of the amms from the factory
             let mut amms: Vec<AMM> = factory
                 .get_all_amms(Some(current_block), middleware.clone(), step)
@@ -72,11 +74,11 @@ pub async fn sync_amms<M: 'static + Middleware>(
             factory_spinner.finish_and_clear();
 
             Ok::<_, AMMError<M>>(amms)
-        }));
+        });
     }
 
-    for handle in handles {
-        match handle.await {
+    while let Some(amm) = handles.join_next().await {
+        match amm {
             Ok(sync_result) => aggregated_amms.extend(sync_result?),
             Err(err) => {
                 {
@@ -92,6 +94,7 @@ pub async fn sync_amms<M: 'static + Middleware>(
     //Save a checkpoint if a path is provided
 
     if let Some(checkpoint_path) = checkpoint_path {
+        spinner.set_message("Saving checkpoint...");
         checkpoint::construct_checkpoint(
             factories,
             &aggregated_amms,
