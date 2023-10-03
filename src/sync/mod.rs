@@ -127,7 +127,7 @@ pub async fn populate_amms<M: 'static + Middleware>(
     if amms_are_congruent(amms) {
         match amms[0] {
             AMM::UniswapV2Pool(_) => {
-                let step = 127; //Max batch size for call
+                let step = 100; //Max batch size for call
                 for amm_chunk in amms.chunks(step) {
                     let middleware = middleware.clone();
                     let progress = progress.clone();
