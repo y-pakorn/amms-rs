@@ -13,6 +13,6 @@ lazy_static! {
         .template("{msg} {bar:40.cyan/blue} {pos:>7}/{len:7} {eta}")
         .unwrap();
     pub static ref CONSTANT_RETRY: ConstantBuilder = ConstantBuilder::default()
-        .with_max_times(3)
-        .with_delay(Duration::from_millis(100));
+        .with_max_times(6)
+        .with_delay(Duration::from_millis(200));
 }

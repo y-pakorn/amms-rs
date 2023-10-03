@@ -78,17 +78,17 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
 
     //Sync all uniswap v2 pools from checkpoint
     if !uniswap_v2_pools.is_empty() {
-        handles.push(
+        handles.extend(
             batch_sync_amms_from_checkpoint(uniswap_v2_pools, current_block, middleware.clone())
-                .await,
+                .await?,
         );
     }
 
     //Sync all uniswap v3 pools from checkpoint
     if !uniswap_v3_pools.is_empty() {
-        handles.push(
+        handles.extend(
             batch_sync_amms_from_checkpoint(uniswap_v3_pools, current_block, middleware.clone())
-                .await,
+                .await?,
         );
     }
 
@@ -174,10 +174,10 @@ pub async fn get_new_amms_from_range<M: 'static + Middleware>(
 }
 
 pub async fn batch_sync_amms_from_checkpoint<M: 'static + Middleware>(
-    mut amms: Vec<AMM>,
+    amms: Vec<AMM>,
     block_number: u64,
     middleware: Arc<M>,
-) -> JoinHandle<Result<Vec<AMM>, AMMError<M>>> {
+) -> Result<Vec<JoinHandle<Result<Vec<AMM>, AMMError<M>>>>, AMMError<M>> {
     let factory = match amms[0] {
         AMM::UniswapV2Pool(_) => Some(Factory::UniswapV2Factory(UniswapV2Factory::new(
             H160::zero(),
@@ -194,26 +194,30 @@ pub async fn batch_sync_amms_from_checkpoint<M: 'static + Middleware>(
     };
 
     //Spawn a new thread to get all pools and sync data for each dex
-    tokio::spawn(async move {
-        if let Some(_factory) = factory {
-            if amms_are_congruent(&amms) {
-                //Get all pool data via batched calls
-                amms = populate_amms(&amms, block_number, None, middleware).await?;
-                //factory
-                //.populate_amm_data(&mut amms, block_number, middleware)
-                //.await?;
-
-                //Clean empty pools
-                amms = sync::remove_empty_amms(amms);
-
-                Ok::<_, AMMError<M>>(amms)
-            } else {
-                Err(AMMError::IncongruentAMMs)
+    if let Some(_factory) = factory {
+        if amms_are_congruent(&amms) {
+            let mut handles = vec![];
+            for amms in amms.chunks(50_000) {
+                let mut amms = amms.to_vec();
+                let middleware = middleware.clone();
+                handles.push(tokio::spawn(async move {
+                    //Get all pool data via batched calls
+                    amms = populate_amms(&amms, block_number, None, middleware).await?;
+                    //factory
+                    //.populate_amm_data(&mut amms, block_number, middleware)
+                    //.await?;
+                    //Clean empty pools
+                    amms = sync::remove_empty_amms(amms);
+                    Ok::<_, AMMError<M>>(amms)
+                }));
             }
+            Ok::<_, AMMError<M>>(handles)
         } else {
-            Ok::<_, AMMError<M>>(vec![])
+            Err(AMMError::IncongruentAMMs)
         }
-    })
+    } else {
+        Ok::<_, AMMError<M>>(vec![])
+    }
 }
 
 pub fn sort_amms(amms: Vec<AMM>) -> (Vec<AMM>, Vec<AMM>, Vec<AMM>) {
