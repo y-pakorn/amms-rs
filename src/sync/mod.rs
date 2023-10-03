@@ -36,10 +36,19 @@ pub async fn sync_amms<M: 'static + Middleware>(
 
         //Spawn a new thread to get all pools and sync data for each dex
         handles.push(tokio::spawn(async move {
+            let mut factory_spinner = Spinner::new(
+                spinners::Dots2,
+                format!("Getting all pools from {}", factory.address()),
+                Color::Blue,
+            );
             //Get all of the amms from the factory
             let mut amms: Vec<AMM> = factory
                 .get_all_amms(Some(current_block), middleware.clone(), step)
                 .await?;
+            factory_spinner.update_text(format!(
+                "Populating pool's data from {}... Done",
+                factory.address()
+            ));
             populate_amms(&mut amms, current_block, middleware.clone()).await?;
 
             //Clean empty pools
@@ -54,6 +63,7 @@ pub async fn sync_amms<M: 'static + Middleware>(
                 }
             }
 
+            factory_spinner.clear();
             Ok::<_, AMMError<M>>(amms)
         }));
     }

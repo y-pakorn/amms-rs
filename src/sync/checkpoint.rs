@@ -9,6 +9,7 @@ use ethers::{providers::Middleware, types::H160};
 
 use serde::{Deserialize, Serialize};
 
+use spinoff::{spinners, Color, Spinner};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -54,6 +55,12 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
     step: u64,
     middleware: Arc<M>,
 ) -> Result<(Vec<Factory>, Vec<AMM>), AMMError<M>> {
+    let spinner = Spinner::new(
+        spinners::Dots,
+        "Syncing AMMs from checkpoint file...",
+        Color::Blue,
+    );
+
     let current_block = middleware
         .get_block_number()
         .await
@@ -126,6 +133,8 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
             }
         }
     }
+
+    spinner.clear();
 
     //update the sync checkpoint
     construct_checkpoint(
