@@ -127,19 +127,21 @@ pub async fn populate_amms<M: 'static + Middleware>(
     if amms_are_congruent(amms) {
         match amms[0] {
             AMM::UniswapV2Pool(_) => {
-                let step = 100; //Max batch size for call
+                let step = 127; //Max batch size for call
                 for amm_chunk in amms.chunks(step) {
                     let middleware = middleware.clone();
                     let progress = progress.clone();
-                    let mut amm_chunk = amm_chunk.to_vec();
+                    let amm_chunk = amm_chunk.to_vec();
                     handles.spawn(async move {
-                        uniswap_v2::batch_request::get_amm_data_batch_request(
-                            &mut amm_chunk,
-                            middleware.clone(),
-                        )
-                        .await?;
+                        let requested_chunks =
+                            uniswap_v2::batch_request::get_amm_data_batch_request_optional(
+                                &amm_chunk,
+                                middleware.clone(),
+                            )
+                            .await
+                            .unwrap_or_default();
                         progress.inc(amm_chunk.len() as u64);
-                        Ok::<_, AMMError<M>>(amm_chunk)
+                        Ok::<_, AMMError<M>>(requested_chunks)
                     });
 
                     if handles.len() == TASK_LIMIT {

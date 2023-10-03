@@ -137,6 +137,69 @@ pub async fn get_amm_data_batch_request<M: Middleware>(
     Ok(())
 }
 
+pub async fn get_amm_data_batch_request_optional<M: Middleware>(
+    amms: &[AMM],
+    middleware: Arc<M>,
+) -> Option<Vec<AMM>> {
+    let mut target_addresses = vec![];
+    let mut amms = amms.to_vec();
+    for amm in amms.iter() {
+        target_addresses.push(Token::Address(amm.address()));
+    }
+
+    let constructor_args = Token::Tuple(vec![Token::Array(target_addresses)]);
+
+    let deployer =
+        IGetUniswapV2PoolDataBatchRequest::deploy(middleware.clone(), constructor_args).ok()?;
+
+    let call = || async { deployer.call_raw().await };
+    let return_data: Bytes = call.retry(&*CONSTANT_RETRY).await.ok()?;
+    let return_data_tokens = ethers::abi::decode(
+        &[ParamType::Array(Box::new(ParamType::Tuple(vec![
+            ParamType::Address,   // token a
+            ParamType::Uint(8),   // token a decimals
+            ParamType::Address,   // token b
+            ParamType::Uint(8),   // token b decimals
+            ParamType::Uint(112), // reserve 0
+            ParamType::Uint(112), // reserve 1
+        ])))],
+        &return_data,
+    )
+    .ok()?;
+
+    let mut pool_idx = 0;
+
+    for tokens in return_data_tokens {
+        if let Some(tokens_arr) = tokens.into_array() {
+            for tup in tokens_arr {
+                if let Some(pool_data) = tup.into_tuple() {
+                    //If the pool token A is not zero, signaling that the pool data was populated
+                    if let Some(address) = pool_data[0].to_owned().into_address() {
+                        if !address.is_zero() {
+                            //Update the pool data
+                            if let AMM::UniswapV2Pool(uniswap_v2_pool) = amms
+                                .get_mut(pool_idx)
+                                .expect("Pool idx should be in bounds")
+                            {
+                                if let Some(pool) = populate_pool_data_from_tokens(
+                                    uniswap_v2_pool.to_owned(),
+                                    pool_data,
+                                ) {
+                                    *uniswap_v2_pool = pool;
+                                }
+                            }
+                        }
+                    }
+
+                    pool_idx += 1;
+                }
+            }
+        }
+    }
+
+    Some(amms)
+}
+
 pub async fn get_v2_pool_data_batch_request<M: Middleware>(
     pool: &mut UniswapV2Pool,
     middleware: Arc<M>,
