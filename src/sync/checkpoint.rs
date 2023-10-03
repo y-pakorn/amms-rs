@@ -2,14 +2,12 @@ use std::{
     fs::read_to_string,
     panic::resume_unwind,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use ethers::{providers::Middleware, types::H160};
-
+use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
-
-use spinoff::{spinners, Color, Spinner};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -19,11 +17,12 @@ use crate::{
         uniswap_v3::factory::UniswapV3Factory,
         AMM,
     },
+    constants::{MULTIPROGRESS, SPINNER_STYLE},
     errors::{AMMError, CheckpointError},
     sync,
 };
 
-use super::amms_are_congruent;
+use super::{amms_are_congruent, populate_amms};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
@@ -55,11 +54,12 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
     step: u64,
     middleware: Arc<M>,
 ) -> Result<(Vec<Factory>, Vec<AMM>), AMMError<M>> {
-    let spinner = Spinner::new(
-        spinners::Dots,
-        "Syncing AMMs from checkpoint file...",
-        Color::Blue,
+    let spinner = MULTIPROGRESS.add(
+        ProgressBar::new_spinner()
+            .with_style(SPINNER_STYLE.clone())
+            .with_message("Syncing AMMs from checkpoint file..."),
     );
+    spinner.enable_steady_tick(Duration::from_millis(200));
 
     let current_block = middleware
         .get_block_number()
@@ -79,24 +79,16 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
     //Sync all uniswap v2 pools from checkpoint
     if !uniswap_v2_pools.is_empty() {
         handles.push(
-            batch_sync_amms_from_checkpoint(
-                uniswap_v2_pools,
-                Some(current_block),
-                middleware.clone(),
-            )
-            .await,
+            batch_sync_amms_from_checkpoint(uniswap_v2_pools, current_block, middleware.clone())
+                .await,
         );
     }
 
     //Sync all uniswap v3 pools from checkpoint
     if !uniswap_v3_pools.is_empty() {
         handles.push(
-            batch_sync_amms_from_checkpoint(
-                uniswap_v3_pools,
-                Some(current_block),
-                middleware.clone(),
-            )
-            .await,
+            batch_sync_amms_from_checkpoint(uniswap_v3_pools, current_block, middleware.clone())
+                .await,
         );
     }
 
@@ -134,8 +126,6 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
         }
     }
 
-    spinner.clear();
-
     //update the sync checkpoint
     construct_checkpoint(
         checkpoint.factories.clone(),
@@ -143,6 +133,8 @@ pub async fn sync_amms_from_checkpoint<M: 'static + Middleware>(
         current_block,
         path_to_checkpoint,
     )?;
+
+    spinner.finish_and_clear();
 
     Ok((checkpoint.factories, aggregated_amms))
 }
@@ -183,7 +175,7 @@ pub async fn get_new_amms_from_range<M: 'static + Middleware>(
 
 pub async fn batch_sync_amms_from_checkpoint<M: 'static + Middleware>(
     mut amms: Vec<AMM>,
-    block_number: Option<u64>,
+    block_number: u64,
     middleware: Arc<M>,
 ) -> JoinHandle<Result<Vec<AMM>, AMMError<M>>> {
     let factory = match amms[0] {
@@ -203,12 +195,13 @@ pub async fn batch_sync_amms_from_checkpoint<M: 'static + Middleware>(
 
     //Spawn a new thread to get all pools and sync data for each dex
     tokio::spawn(async move {
-        if let Some(factory) = factory {
+        if let Some(_factory) = factory {
             if amms_are_congruent(&amms) {
                 //Get all pool data via batched calls
-                factory
-                    .populate_amm_data(&mut amms, block_number, middleware)
-                    .await?;
+                amms = populate_amms(&amms, block_number, None, middleware).await?;
+                //factory
+                //.populate_amm_data(&mut amms, block_number, middleware)
+                //.await?;
 
                 //Clean empty pools
                 amms = sync::remove_empty_amms(amms);

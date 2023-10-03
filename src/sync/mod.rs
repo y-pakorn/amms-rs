@@ -6,7 +6,6 @@ use crate::{
     constants::{MULTIPROGRESS, SPINNER_STYLE, SYNC_BAR_STYLE},
     errors::AMMError,
 };
-
 use ethers::{providers::Middleware, types::H160};
 use indicatif::ProgressBar;
 use std::{sync::Arc, time::Duration};
@@ -51,7 +50,7 @@ pub async fn sync_amms<M: 'static + Middleware>(
             amms = populate_amms(
                 &mut amms,
                 current_block,
-                factory.address(),
+                Some(factory.address()),
                 middleware.clone(),
             )
             .await?;
@@ -109,13 +108,16 @@ pub fn amms_are_congruent(amms: &[AMM]) -> bool {
 pub async fn populate_amms<M: 'static + Middleware>(
     amms: &[AMM],
     block_number: u64,
-    address: H160,
+    address: Option<H160>,
     middleware: Arc<M>,
 ) -> Result<Vec<AMM>, AMMError<M>> {
     let progress = MULTIPROGRESS.add(
         ProgressBar::new(amms.len() as u64)
             .with_style(SYNC_BAR_STYLE.clone())
-            .with_message(format!("Populating pools data from: {}", address)),
+            .with_message(match address {
+                Some(address) => format!("Populating pools data from: {}", address),
+                None => "Populating pools data".to_string(),
+            }),
     );
     progress.tick();
 
