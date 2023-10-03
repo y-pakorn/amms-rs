@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use tokio::task::JoinSet;
 
 use crate::{
-    amm::{factory::AutomatedMarketMakerFactory, AMM},
+    amm::{
+        factory::{AutomatedMarketMakerFactory, TASK_LIMIT},
+        AMM,
+    },
     constants::{MULTIPROGRESS, SYNC_BAR_STYLE},
     errors::AMMError,
 };
@@ -75,6 +78,7 @@ impl UniswapV2Factory {
             U256::from(step)
         };
         let mut handles = JoinSet::new();
+        let mut amms = vec![];
 
         for _ in (0..pairs_length.as_u128()).step_by(step) {
             let middleware = middleware.clone();
@@ -98,11 +102,25 @@ impl UniswapV2Factory {
             } else {
                 idx_to = idx_to + step;
             }
+
+            if handles.len() == TASK_LIMIT {
+                Self::process_amm_from_requests(&mut amms, handles).await?;
+                handles = JoinSet::new();
+            }
         }
 
-        //Create new empty pools for each pair
-        let mut amms = vec![];
-        while let Some(pair) = handles.join_next().await {
+        Self::process_amm_from_requests(&mut amms, handles).await?;
+
+        progress.finish_and_clear();
+
+        Ok(amms)
+    }
+
+    pub async fn process_amm_from_requests<M: 'static + Middleware>(
+        amms: &mut Vec<AMM>,
+        mut set: JoinSet<Result<Vec<H160>, AMMError<M>>>,
+    ) -> Result<(), AMMError<M>> {
+        while let Some(pair) = set.join_next().await {
             for address in pair?? {
                 let amm = UniswapV2Pool {
                     address,
@@ -112,10 +130,7 @@ impl UniswapV2Factory {
                 amms.push(AMM::UniswapV2Pool(amm));
             }
         }
-
-        progress.finish_and_clear();
-
-        Ok(amms)
+        Ok(())
     }
 }
 
