@@ -67,7 +67,7 @@ impl UniswapV2Factory {
         let progress = MULTIPROGRESS.add(
             ProgressBar::new(pairs_length.as_u64())
                 .with_style(SYNC_BAR_STYLE.clone())
-                .with_message(format!("Getting all pools from: {}", self.address)),
+                .with_message(format!("Getting all v2 pools from: {}", self.address)),
         );
 
         let step = 766; //max batch size for this call until codesize is too large

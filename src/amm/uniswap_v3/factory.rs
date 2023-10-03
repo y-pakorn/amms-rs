@@ -13,7 +13,7 @@ use ethers::{
 };
 use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
-use tokio::task::JoinHandle;
+use tokio::task::JoinSet;
 
 use crate::{
     amm::{
@@ -157,15 +157,14 @@ impl UniswapV3Factory {
         let mut aggregated_amms: HashMap<H160, AMM> = HashMap::new();
         let mut ordered_logs: BTreeMap<U64, Vec<Log>> = BTreeMap::new();
 
-        let mut handles = vec![];
+        let mut handles = JoinSet::new();
 
         let progress = MULTIPROGRESS.add(
             ProgressBar::new(to_block - from_block)
                 .with_style(SYNC_BAR_STYLE.clone())
-                .with_message(format!("Getting all pools from: {}", self.address)),
+                .with_message(format!("Getting all v3 pools from: {}", self.address)),
         );
 
-        let mut tasks = 0;
         while from_block < to_block {
             let middleware = middleware.clone();
             let progress = progress.clone();
@@ -175,7 +174,7 @@ impl UniswapV3Factory {
                 target_block = to_block;
             }
 
-            handles.push(tokio::spawn(async move {
+            handles.spawn(async move {
                 let call = || async {
                     middleware
                         .get_logs(
@@ -195,24 +194,20 @@ impl UniswapV3Factory {
                     .await
                     .map_err(AMMError::MiddlewareError)?;
 
-                progress.inc(step);
+                progress.inc(target_block - from_block);
                 Ok::<Vec<Log>, AMMError<M>>(logs)
-            }));
+            });
 
             from_block += step;
 
-            tasks += 1;
             //Here we are limiting the number of green threads that can be spun up to not have the node time out
-            if tasks == TASK_LIMIT {
-                self.process_logs_from_handles(handles, &mut ordered_logs)
-                    .await?;
-                handles = vec![];
-                tasks = 0;
+            if handles.len() == TASK_LIMIT {
+                Self::process_logs_from_handles(&mut ordered_logs, handles).await?;
+                handles = JoinSet::new();
             }
         }
 
-        self.process_logs_from_handles(handles, &mut ordered_logs)
-            .await?;
+        Self::process_logs_from_handles(&mut ordered_logs, handles).await?;
 
         for (_, log_group) in ordered_logs {
             for log in log_group {
@@ -247,14 +242,13 @@ impl UniswapV3Factory {
         Ok(aggregated_amms.into_values().collect::<Vec<AMM>>())
     }
 
-    async fn process_logs_from_handles<M: Middleware>(
-        &self,
-        handles: Vec<JoinHandle<Result<Vec<Log>, AMMError<M>>>>,
+    async fn process_logs_from_handles<M: 'static + Middleware>(
         ordered_logs: &mut BTreeMap<U64, Vec<Log>>,
+        mut handles: JoinSet<Result<Vec<Log>, AMMError<M>>>,
     ) -> Result<(), AMMError<M>> {
         // group the logs from each thread by block number and then sync the logs in chronological order
-        for handle in handles {
-            let logs = handle.await??;
+        while let Some(handle) = handles.join_next().await {
+            let logs = handle??;
 
             for log in logs {
                 if let Some(log_block_number) = log.block_number {
