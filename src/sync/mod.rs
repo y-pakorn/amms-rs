@@ -3,11 +3,11 @@ use crate::{
         factory::{AutomatedMarketMakerFactory, Factory},
         uniswap_v2, uniswap_v3, AutomatedMarketMaker, AMM,
     },
-    constants::{MULTIPROGRESS, SPINNER_STYLE},
+    constants::{MULTIPROGRESS, SPINNER_STYLE, SYNC_BAR_STYLE},
     errors::AMMError,
 };
 
-use ethers::providers::Middleware;
+use ethers::{providers::Middleware, types::H160};
 use indicatif::ProgressBar;
 use std::{sync::Arc, time::Duration};
 use tokio::task::JoinSet;
@@ -48,7 +48,13 @@ pub async fn sync_amms<M: 'static + Middleware>(
                 .get_all_amms(Some(current_block), middleware.clone(), step)
                 .await?;
             //Populate the amms with data
-            amms = populate_amms(&mut amms, current_block, middleware.clone()).await?;
+            amms = populate_amms(
+                &mut amms,
+                current_block,
+                factory.address(),
+                middleware.clone(),
+            )
+            .await?;
 
             //Clean empty pools
             amms = remove_empty_amms(amms);
@@ -103,8 +109,14 @@ pub fn amms_are_congruent(amms: &[AMM]) -> bool {
 pub async fn populate_amms<M: 'static + Middleware>(
     amms: &[AMM],
     block_number: u64,
+    address: H160,
     middleware: Arc<M>,
 ) -> Result<Vec<AMM>, AMMError<M>> {
+    let progress = MULTIPROGRESS.add(
+        ProgressBar::new(amms.len() as u64)
+            .with_style(SYNC_BAR_STYLE.clone())
+            .with_message(format!("Populating pools data from: {}", address)),
+    );
     let mut handles = JoinSet::new();
     if amms_are_congruent(amms) {
         match amms[0] {
@@ -112,6 +124,7 @@ pub async fn populate_amms<M: 'static + Middleware>(
                 let step = 127; //Max batch size for call
                 for amm_chunk in amms.chunks(step) {
                     let middleware = middleware.clone();
+                    let progress = progress.clone();
                     let mut amm_chunk = amm_chunk.to_vec();
                     handles.spawn(async move {
                         uniswap_v2::batch_request::get_amm_data_batch_request(
@@ -119,7 +132,7 @@ pub async fn populate_amms<M: 'static + Middleware>(
                             middleware.clone(),
                         )
                         .await?;
-
+                        progress.inc(amm_chunk.len() as u64);
                         Ok::<_, AMMError<M>>(amm_chunk)
                     });
                 }
@@ -129,6 +142,7 @@ pub async fn populate_amms<M: 'static + Middleware>(
                 let step = 76; //Max batch size for call
                 for amm_chunk in amms.chunks(step) {
                     let middleware = middleware.clone();
+                    let progress = progress.clone();
                     let mut amm_chunk = amm_chunk.to_vec();
                     handles.spawn(async move {
                         uniswap_v3::batch_request::get_amm_data_batch_request(
@@ -137,6 +151,7 @@ pub async fn populate_amms<M: 'static + Middleware>(
                             middleware.clone(),
                         )
                         .await?;
+                        progress.inc(amm_chunk.len() as u64);
                         Ok::<_, AMMError<M>>(amm_chunk)
                     });
                 }
@@ -146,9 +161,11 @@ pub async fn populate_amms<M: 'static + Middleware>(
             AMM::ERC4626Vault(_) => {
                 for amm in amms {
                     let mut amm = amm.clone();
+                    let progress = progress.clone();
                     let middleware = middleware.clone();
                     handles.spawn(async move {
                         amm.populate_data(None, middleware.clone()).await?;
+                        progress.inc(1);
                         Ok::<_, AMMError<M>>(vec![amm])
                     });
                 }
@@ -159,6 +176,8 @@ pub async fn populate_amms<M: 'static + Middleware>(
         while let Some(amm_chunk) = handles.join_next().await {
             updated_amms.extend(amm_chunk??);
         }
+
+        progress.finish_and_clear();
 
         Ok(updated_amms)
     } else {
