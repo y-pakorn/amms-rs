@@ -10,6 +10,7 @@ use ethers::{
     providers::Middleware,
     types::{BlockNumber, Filter, Log, H160, H256, U256, U64},
 };
+use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 
@@ -18,6 +19,7 @@ use crate::{
         factory::{AutomatedMarketMakerFactory, TASK_LIMIT},
         AutomatedMarketMaker, AMM,
     },
+    constants::{MULTIPROGRESS, SYNC_BAR_STYLE},
     errors::{AMMError, EventLogError},
 };
 
@@ -156,9 +158,16 @@ impl UniswapV3Factory {
 
         let mut handles = vec![];
 
+        let progress = MULTIPROGRESS.add(
+            ProgressBar::new(to_block - from_block)
+                .with_style(SYNC_BAR_STYLE.clone())
+                .with_message(format!("Getting all pools from: {}", self.address)),
+        );
+
         let mut tasks = 0;
         while from_block < to_block {
             let middleware = middleware.clone();
+            let progress = progress.clone();
 
             let mut target_block = from_block + step - 1;
             if target_block > to_block {
@@ -180,6 +189,7 @@ impl UniswapV3Factory {
                     .await
                     .map_err(AMMError::MiddlewareError)?;
 
+                progress.inc(step);
                 Ok::<Vec<Log>, AMMError<M>>(logs)
             }));
 
@@ -225,6 +235,8 @@ impl UniswapV3Factory {
                 }
             }
         }
+
+        progress.finish_and_clear();
 
         Ok(aggregated_amms.into_values().collect::<Vec<AMM>>())
     }

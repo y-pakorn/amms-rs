@@ -9,7 +9,7 @@ use crate::{
 
 use ethers::providers::Middleware;
 use indicatif::ProgressBar;
-use std::{panic::resume_unwind, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::task::JoinSet;
 
 pub mod checkpoint;
@@ -43,21 +43,12 @@ pub async fn sync_amms<M: 'static + Middleware>(
 
         //Spawn a new thread to get all pools and sync data for each dex
         handles.spawn(async move {
-            let factory_spinner = MULTIPROGRESS.add(
-                ProgressBar::new_spinner()
-                    .with_style(SPINNER_STYLE.clone())
-                    .with_message(format!("Getting all pools from: {}", factory.address())),
-            );
-            factory_spinner.enable_steady_tick(Duration::from_millis(200));
             //Get all of the amms from the factory
             let mut amms: Vec<AMM> = factory
                 .get_all_amms(Some(current_block), middleware.clone(), step)
                 .await?;
-            factory_spinner.set_message(format!(
-                "Populating pool's data from: {}",
-                factory.address()
-            ));
-            populate_amms(&mut amms, current_block, middleware.clone()).await?;
+            //Populate the amms with data
+            amms = populate_amms(&mut amms, current_block, middleware.clone()).await?;
 
             //Clean empty pools
             amms = remove_empty_amms(amms);
@@ -71,24 +62,12 @@ pub async fn sync_amms<M: 'static + Middleware>(
                 }
             }
 
-            factory_spinner.finish_and_clear();
-
             Ok::<_, AMMError<M>>(amms)
         });
     }
 
     while let Some(amm) = handles.join_next().await {
-        match amm {
-            Ok(sync_result) => aggregated_amms.extend(sync_result?),
-            Err(err) => {
-                {
-                    if err.is_panic() {
-                        // Resume the panic on the main task
-                        resume_unwind(err.into_panic());
-                    }
-                }
-            }
-        }
+        aggregated_amms.extend(amm??);
     }
 
     //Save a checkpoint if a path is provided
@@ -121,49 +100,70 @@ pub fn amms_are_congruent(amms: &[AMM]) -> bool {
 }
 
 //Gets all pool data and sync reserves
-pub async fn populate_amms<M: Middleware>(
-    amms: &mut [AMM],
+pub async fn populate_amms<M: 'static + Middleware>(
+    amms: &[AMM],
     block_number: u64,
     middleware: Arc<M>,
-) -> Result<(), AMMError<M>> {
+) -> Result<Vec<AMM>, AMMError<M>> {
+    let mut handles = JoinSet::new();
     if amms_are_congruent(amms) {
         match amms[0] {
             AMM::UniswapV2Pool(_) => {
                 let step = 127; //Max batch size for call
-                for amm_chunk in amms.chunks_mut(step) {
-                    uniswap_v2::batch_request::get_amm_data_batch_request(
-                        amm_chunk,
-                        middleware.clone(),
-                    )
-                    .await?;
+                for amm_chunk in amms.chunks(step) {
+                    let middleware = middleware.clone();
+                    let mut amm_chunk = amm_chunk.to_vec();
+                    handles.spawn(async move {
+                        uniswap_v2::batch_request::get_amm_data_batch_request(
+                            &mut amm_chunk,
+                            middleware.clone(),
+                        )
+                        .await?;
+
+                        Ok::<_, AMMError<M>>(amm_chunk)
+                    });
                 }
             }
 
             AMM::UniswapV3Pool(_) => {
                 let step = 76; //Max batch size for call
-                for amm_chunk in amms.chunks_mut(step) {
-                    uniswap_v3::batch_request::get_amm_data_batch_request(
-                        amm_chunk,
-                        block_number,
-                        middleware.clone(),
-                    )
-                    .await?;
+                for amm_chunk in amms.chunks(step) {
+                    let middleware = middleware.clone();
+                    let mut amm_chunk = amm_chunk.to_vec();
+                    handles.spawn(async move {
+                        uniswap_v3::batch_request::get_amm_data_batch_request(
+                            &mut amm_chunk,
+                            block_number,
+                            middleware.clone(),
+                        )
+                        .await?;
+                        Ok::<_, AMMError<M>>(amm_chunk)
+                    });
                 }
             }
 
             // TODO: Implement batch request
             AMM::ERC4626Vault(_) => {
                 for amm in amms {
-                    amm.populate_data(None, middleware.clone()).await?;
+                    let mut amm = amm.clone();
+                    let middleware = middleware.clone();
+                    handles.spawn(async move {
+                        amm.populate_data(None, middleware.clone()).await?;
+                        Ok::<_, AMMError<M>>(vec![amm])
+                    });
                 }
             }
+        };
+
+        let mut updated_amms = vec![];
+        while let Some(amm_chunk) = handles.join_next().await {
+            updated_amms.extend(amm_chunk??);
         }
+
+        Ok(updated_amms)
     } else {
         return Err(AMMError::IncongruentAMMs);
     }
-
-    //For each pair in the pairs vec, get the pool data
-    Ok(())
 }
 
 pub fn remove_empty_amms(amms: Vec<AMM>) -> Vec<AMM> {

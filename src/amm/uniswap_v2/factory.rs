@@ -8,10 +8,13 @@ use ethers::{
     types::{Log, H160, H256, U256},
 };
 
+use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
+use tokio::task::JoinSet;
 
 use crate::{
     amm::{factory::AutomatedMarketMakerFactory, AMM},
+    constants::{MULTIPROGRESS, SYNC_BAR_STYLE},
     errors::AMMError,
 };
 
@@ -35,7 +38,7 @@ pub const PAIR_CREATED_EVENT_SIGNATURE: H256 = H256([
     131, 85, 205, 222, 253, 227, 26, 250, 40, 208, 233,
 ]);
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct UniswapV2Factory {
     pub address: H160,
     pub creation_block: u64,
@@ -51,15 +54,19 @@ impl UniswapV2Factory {
         }
     }
 
-    pub async fn get_all_pairs_via_batched_calls<M: Middleware>(
-        &self,
+    pub async fn get_all_pairs_via_batched_calls<M: 'static + Middleware>(
+        self,
         middleware: Arc<M>,
     ) -> Result<Vec<AMM>, AMMError<M>> {
         let factory = IUniswapV2Factory::new(self.address, middleware.clone());
 
         let pairs_length: U256 = factory.all_pairs_length().call().await?;
+        let progress = MULTIPROGRESS.add(
+            ProgressBar::new(pairs_length.as_u64())
+                .with_style(SYNC_BAR_STYLE.clone())
+                .with_message(format!("Getting all pools from: {}", self.address)),
+        );
 
-        let mut pairs = vec![];
         let step = 766; //max batch size for this call until codesize is too large
         let mut idx_from = U256::zero();
         let mut idx_to = if step > pairs_length.as_usize() {
@@ -67,17 +74,22 @@ impl UniswapV2Factory {
         } else {
             U256::from(step)
         };
+        let mut handles = JoinSet::new();
 
         for _ in (0..pairs_length.as_u128()).step_by(step) {
-            pairs.append(
-                &mut batch_request::get_pairs_batch_request(
+            let middleware = middleware.clone();
+            let progress = progress.clone();
+            handles.spawn(async move {
+                let pairs = batch_request::get_pairs_batch_request(
                     self.address,
                     idx_from,
                     idx_to,
-                    middleware.clone(),
+                    middleware,
                 )
-                .await?,
-            );
+                .await?;
+                progress.inc(idx_to.as_u64() - idx_from.as_u64());
+                Ok::<_, AMMError<M>>(pairs)
+            });
 
             idx_from = idx_to;
 
@@ -88,17 +100,20 @@ impl UniswapV2Factory {
             }
         }
 
-        let mut amms = vec![];
-
         //Create new empty pools for each pair
-        for addr in pairs {
-            let amm = UniswapV2Pool {
-                address: addr,
-                ..Default::default()
-            };
+        let mut amms = vec![];
+        while let Some(pair) = handles.join_next().await {
+            for address in pair?? {
+                let amm = UniswapV2Pool {
+                    address,
+                    ..Default::default()
+                };
 
-            amms.push(AMM::UniswapV2Pool(amm));
+                amms.push(AMM::UniswapV2Pool(amm));
+            }
         }
+
+        progress.finish_and_clear();
 
         Ok(amms)
     }
@@ -141,7 +156,7 @@ impl AutomatedMarketMakerFactory for UniswapV2Factory {
         }))
     }
 
-    async fn get_all_amms<M: Middleware>(
+    async fn get_all_amms<M: 'static + Middleware>(
         &self,
         _to_block: Option<u64>,
         middleware: Arc<M>,

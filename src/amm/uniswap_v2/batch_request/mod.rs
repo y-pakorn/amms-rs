@@ -51,13 +51,15 @@ pub async fn get_pairs_batch_request<M: Middleware>(
         Token::Address(factory),
     ]);
 
-    let deployer = IGetUniswapV2PairsBatchRequest::deploy(middleware, constructor_args)?;
-    let return_data: Bytes = deployer.call_raw().await?;
+    let deployer = IGetUniswapV2PairsBatchRequest::deploy(middleware, constructor_args)
+        .map_err(AMMError::ContractError)?;
+    let return_data: Bytes = deployer.call_raw().await.map_err(AMMError::ProviderError)?;
 
     let return_data_tokens = ethers::abi::decode(
         &[ParamType::Array(Box::new(ParamType::Address))],
         &return_data,
-    )?;
+    )
+    .map_err(AMMError::EthABIError)?;
 
     for token_array in return_data_tokens {
         if let Some(arr) = token_array.into_array() {
