@@ -1,3 +1,4 @@
+use backon::Retryable;
 use ethers::{
     abi::{ParamType, Token},
     providers::Middleware,
@@ -7,6 +8,7 @@ use std::sync::Arc;
 
 use crate::{
     amm::{AutomatedMarketMaker, AMM},
+    constants::CONSTANT_RETRY,
     errors::AMMError,
 };
 
@@ -51,15 +53,14 @@ pub async fn get_pairs_batch_request<M: Middleware>(
         Token::Address(factory),
     ]);
 
-    let deployer = IGetUniswapV2PairsBatchRequest::deploy(middleware, constructor_args)
-        .map_err(AMMError::ContractError)?;
-    let return_data: Bytes = deployer.call_raw().await.map_err(AMMError::ProviderError)?;
+    let deployer = IGetUniswapV2PairsBatchRequest::deploy(middleware, constructor_args)?;
+    let call = || async { deployer.call_raw().await };
+    let return_data: Bytes = call.retry(&*CONSTANT_RETRY).await?;
 
     let return_data_tokens = ethers::abi::decode(
         &[ParamType::Array(Box::new(ParamType::Address))],
         &return_data,
-    )
-    .map_err(AMMError::EthABIError)?;
+    )?;
 
     for token_array in return_data_tokens {
         if let Some(arr) = token_array.into_array() {
@@ -89,7 +90,8 @@ pub async fn get_amm_data_batch_request<M: Middleware>(
 
     let deployer = IGetUniswapV2PoolDataBatchRequest::deploy(middleware.clone(), constructor_args)?;
 
-    let return_data: Bytes = deployer.call_raw().await?;
+    let call = || async { deployer.call_raw().await };
+    let return_data: Bytes = call.retry(&*CONSTANT_RETRY).await?;
     let return_data_tokens = ethers::abi::decode(
         &[ParamType::Array(Box::new(ParamType::Tuple(vec![
             ParamType::Address,   // token a

@@ -4,6 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use backon::Retryable;
 use ethers::{
     abi::RawLog,
     prelude::{abigen, EthEvent},
@@ -19,7 +20,7 @@ use crate::{
         factory::{AutomatedMarketMakerFactory, TASK_LIMIT},
         AutomatedMarketMaker, AMM,
     },
-    constants::{MULTIPROGRESS, SYNC_BAR_STYLE},
+    constants::{CONSTANT_RETRY, MULTIPROGRESS, SYNC_BAR_STYLE},
     errors::{AMMError, EventLogError},
 };
 
@@ -175,17 +176,22 @@ impl UniswapV3Factory {
             }
 
             handles.push(tokio::spawn(async move {
-                let logs = middleware
-                    .get_logs(
-                        &Filter::new()
-                            .topic0(vec![
-                                POOL_CREATED_EVENT_SIGNATURE,
-                                BURN_EVENT_SIGNATURE,
-                                MINT_EVENT_SIGNATURE,
-                            ])
-                            .from_block(BlockNumber::Number(U64([from_block])))
-                            .to_block(BlockNumber::Number(U64([target_block]))),
-                    )
+                let call = || async {
+                    middleware
+                        .get_logs(
+                            &Filter::new()
+                                .topic0(vec![
+                                    POOL_CREATED_EVENT_SIGNATURE,
+                                    BURN_EVENT_SIGNATURE,
+                                    MINT_EVENT_SIGNATURE,
+                                ])
+                                .from_block(BlockNumber::Number(U64([from_block])))
+                                .to_block(BlockNumber::Number(U64([target_block]))),
+                        )
+                        .await
+                };
+                let logs = call
+                    .retry(&*CONSTANT_RETRY)
                     .await
                     .map_err(AMMError::MiddlewareError)?;
 

@@ -1,5 +1,6 @@
 use std::{sync::Arc, vec};
 
+use backon::Retryable;
 use ethers::{
     abi::{ParamType, Token},
     providers::Middleware,
@@ -8,6 +9,7 @@ use ethers::{
 
 use crate::{
     amm::{AutomatedMarketMaker, AMM},
+    constants::CONSTANT_RETRY,
     errors::AMMError,
 };
 
@@ -241,9 +243,11 @@ pub async fn get_amm_data_batch_request<M: Middleware>(
     }
 
     let constructor_args = Token::Tuple(vec![Token::Array(target_addresses)]);
-    let deployer = IGetUniswapV3PoolDataBatchRequest::deploy(middleware.clone(), constructor_args)?;
+    let deployer = IGetUniswapV3PoolDataBatchRequest::deploy(middleware.clone(), constructor_args)?
+        .block(block_number);
 
-    let return_data: Bytes = deployer.block(block_number).call_raw().await?;
+    let call = || async { deployer.call_raw().await };
+    let return_data: Bytes = call.retry(&*CONSTANT_RETRY).await?;
 
     let return_data_tokens = ethers::abi::decode(
         &[ParamType::Array(Box::new(ParamType::Tuple(vec![
