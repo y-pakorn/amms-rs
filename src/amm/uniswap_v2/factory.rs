@@ -70,7 +70,7 @@ impl UniswapV2Factory {
                 .with_message(format!("Getting all v2 pools from: {}", self.address)),
         );
 
-        let step = 766; //max batch size for this call until codesize is too large
+        let step = 700; //max batch size for this call until codesize is too large
         let mut idx_from = U256::zero();
         let mut idx_to = if step > pairs_length.as_usize() {
             pairs_length
