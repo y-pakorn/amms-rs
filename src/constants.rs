@@ -1,7 +1,8 @@
-use indicatif::ProgressStyle;
+use indicatif::{MultiProgress, ProgressStyle};
 use lazy_static::lazy_static;
 
 lazy_static! {
+    pub static ref MULTIPROGRESS: MultiProgress = MultiProgress::new();
     pub static ref SPINNER_STYLE: ProgressStyle = ProgressStyle::default_spinner()
         .template("{spinner:.blue} {msg}")
         .unwrap();

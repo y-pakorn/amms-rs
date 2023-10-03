@@ -3,12 +3,12 @@ use crate::{
         factory::{AutomatedMarketMakerFactory, Factory},
         uniswap_v2, uniswap_v3, AutomatedMarketMaker, AMM,
     },
-    constants::SPINNER_STYLE,
+    constants::{MULTIPROGRESS, SPINNER_STYLE},
     errors::AMMError,
 };
 
 use ethers::providers::Middleware;
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::ProgressBar;
 use std::{panic::resume_unwind, sync::Arc, time::Duration};
 
 pub mod checkpoint;
@@ -19,8 +19,7 @@ pub async fn sync_amms<M: 'static + Middleware>(
     checkpoint_path: Option<&str>,
     step: u64,
 ) -> Result<(Vec<AMM>, u64), AMMError<M>> {
-    let multi_progress_bar = MultiProgress::new();
-    let spinner = multi_progress_bar.add(
+    let spinner = MULTIPROGRESS.add(
         ProgressBar::new_spinner()
             .with_style(SPINNER_STYLE.clone())
             .with_message("Syncing AMMs..."),
@@ -40,12 +39,14 @@ pub async fn sync_amms<M: 'static + Middleware>(
     //For each dex supplied, get all pair created events and get reserve values
     for factory in factories.clone() {
         let middleware = middleware.clone();
-        let factory_spinner =
-            multi_progress_bar.add(ProgressBar::new_spinner().with_style(SPINNER_STYLE.clone()));
 
         //Spawn a new thread to get all pools and sync data for each dex
         handles.push(tokio::spawn(async move {
-            factory_spinner.set_message(format!("Getting all pools from: {}", factory.address()));
+            let factory_spinner = MULTIPROGRESS.add(
+                ProgressBar::new_spinner()
+                    .with_style(SPINNER_STYLE.clone())
+                    .with_message(format!("Getting all pools from: {}", factory.address())),
+            );
             //Get all of the amms from the factory
             let mut amms: Vec<AMM> = factory
                 .get_all_amms(Some(current_block), middleware.clone(), step)
@@ -69,6 +70,7 @@ pub async fn sync_amms<M: 'static + Middleware>(
             }
 
             factory_spinner.finish_and_clear();
+
             Ok::<_, AMMError<M>>(amms)
         }));
     }
