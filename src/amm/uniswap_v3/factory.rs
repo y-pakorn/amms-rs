@@ -164,6 +164,7 @@ impl UniswapV3Factory {
                 .with_style(SYNC_BAR_STYLE.clone())
                 .with_message(format!("Getting all v3 pools from: {}", self.address)),
         );
+        progress.tick();
 
         while from_block < to_block {
             let middleware = middleware.clone();
