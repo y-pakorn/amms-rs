@@ -156,7 +156,7 @@ impl AutomatedMarketMakerFactory for UniswapV2Factory {
         ))
     }
 
-    fn new_empty_amm_from_log(&self, log: Log) -> Result<AMM, ethers::abi::Error> {
+    fn new_empty_amm_from_log(log: Log) -> Result<AMM, ethers::abi::Error> {
         let pair_created_event = PairCreatedFilter::decode_log(&RawLog::from(log))?;
 
         Ok(AMM::UniswapV2Pool(UniswapV2Pool {

@@ -17,7 +17,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     amm::{
-        factory::{AutomatedMarketMakerFactory, TASK_LIMIT_LOGS},
+        factory::{AutomatedMarketMakerFactory, TASK_LIMIT, TASK_LIMIT_LOGS},
         AutomatedMarketMaker, AMM,
     },
     constants::{CONSTANT_RETRY, MULTIPROGRESS, SYNC_BAR_STYLE},
@@ -121,7 +121,7 @@ impl AutomatedMarketMakerFactory for UniswapV3Factory {
         Ok(())
     }
 
-    fn new_empty_amm_from_log(&self, log: Log) -> Result<AMM, ethers::abi::Error> {
+    fn new_empty_amm_from_log(log: Log) -> Result<AMM, ethers::abi::Error> {
         let pool_created_event = PoolCreatedFilter::decode_log(&RawLog::from(log))?;
 
         Ok(AMM::UniswapV3Pool(UniswapV3Pool {
@@ -224,6 +224,7 @@ impl UniswapV3Factory {
                 .with_message(format!("Processing all v3 pools from: {}", self.address)),
         );
         progress.tick();
+        let mut handles = JoinSet::new();
 
         for (_, log_group) in ordered_logs {
             for log in log_group {
@@ -232,37 +233,60 @@ impl UniswapV3Factory {
                 //If the event sig is the pool created event sig, then the log is coming from the factory
                 match (event_signature.0, log.address == self.address) {
                     (POOL_CREATED_EVENT_SIGNATURE_BYTES, true) => {
-                        let mut new_pool = self.new_empty_amm_from_log(log)?;
+                        let log = log.clone();
+                        let middleware = middleware.clone();
+                        handles.spawn(async {
+                            let mut new_pool = Self::new_empty_amm_from_log(log)?;
 
-                        if let AMM::UniswapV3Pool(ref mut pool) = new_pool {
-                            pool.tick_spacing = pool.get_tick_spacing(middleware.clone()).await?;
+                            if let AMM::UniswapV3Pool(ref mut pool) = new_pool {
+                                pool.tick_spacing = pool.get_tick_spacing(middleware).await?;
+                            }
+
+                            Ok::<AMM, AMMError<M>>(new_pool)
+                        });
+
+                        if handles.len() == TASK_LIMIT * 2 {
+                            Self::process_amms_from_handles(&mut aggregated_amms, handles).await?;
+                            handles = JoinSet::new();
                         }
-
-                        aggregated_amms.insert(new_pool.address(), new_pool);
                     }
                     (BURN_EVENT_SIGNATURE_BYTES, _) => {
-                        if let Some(AMM::UniswapV3Pool(pool)) =
-                            aggregated_amms.get_mut(&log.address)
-                        {
-                            pool.sync_from_burn_log(log)?;
-                        }
+                        //if let Some(AMM::UniswapV3Pool(pool)) =
+                        //aggregated_amms.get_mut(&log.address)
+                        //{
+                        //pool.sync_from_burn_log(log)?;
+                        //}
                     }
                     (MINT_EVENT_SIGNATURE_BYTES, _) => {
-                        if let Some(AMM::UniswapV3Pool(pool)) =
-                            aggregated_amms.get_mut(&log.address)
-                        {
-                            pool.sync_from_mint_log(log)?;
-                        }
+                        //if let Some(AMM::UniswapV3Pool(pool)) =
+                        //aggregated_amms.get_mut(&log.address)
+                        //{
+                        //pool.sync_from_mint_log(log)?;
+                        //}
                     }
                     _ => {}
                 };
             }
+
             progress.inc(1);
         }
+
+        Self::process_amms_from_handles(&mut aggregated_amms, handles).await?;
 
         progress.finish_and_clear();
 
         Ok(aggregated_amms.into_values().collect::<Vec<AMM>>())
+    }
+
+    async fn process_amms_from_handles<M: 'static + Middleware>(
+        aggregated_amms: &mut HashMap<H160, AMM>,
+        mut handles: JoinSet<Result<AMM, AMMError<M>>>,
+    ) -> Result<(), AMMError<M>> {
+        while let Some(amm) = handles.join_next().await {
+            let amm = amm??;
+            aggregated_amms.insert(amm.address(), amm);
+        }
+        Ok(())
     }
 
     async fn process_logs_from_handles<M: 'static + Middleware>(

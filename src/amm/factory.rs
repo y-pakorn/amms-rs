@@ -47,7 +47,7 @@ pub trait AutomatedMarketMakerFactory {
         middleware: Arc<M>,
     ) -> Result<AMM, AMMError<M>>;
 
-    fn new_empty_amm_from_log(&self, log: Log) -> Result<AMM, ethers::abi::Error>;
+    fn new_empty_amm_from_log(log: Log) -> Result<AMM, ethers::abi::Error>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
