@@ -91,7 +91,7 @@ impl UniswapV2Factory {
                     middleware,
                 )
                 .await?;
-                progress.inc(idx_to.as_u64() - idx_from.as_u64());
+                progress.inc(idx_to.as_u64() - idx_from.as_u64() + 1);
                 Ok::<_, AMMError<M>>(pairs)
             });
 

@@ -195,7 +195,7 @@ impl UniswapV3Factory {
                     .await
                     .map_err(AMMError::MiddlewareError)?;
 
-                progress.inc(target_block - from_block);
+                progress.inc(target_block - from_block + 1);
                 Ok::<Vec<Log>, AMMError<M>>(logs)
             });
 
