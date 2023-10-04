@@ -48,7 +48,7 @@ pub async fn sync_amms<M: 'static + Middleware>(
                 .await?;
             //Populate the amms with data
             amms = populate_amms(
-                &mut amms,
+                &amms,
                 current_block,
                 Some(factory.address()),
                 middleware.clone(),
@@ -193,7 +193,7 @@ pub async fn populate_amms<M: 'static + Middleware>(
 
         Ok(updated_amms)
     } else {
-        return Err(AMMError::IncongruentAMMs);
+        Err(AMMError::IncongruentAMMs)
     }
 }
 
