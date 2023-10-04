@@ -11,8 +11,12 @@ use tokio::task::JoinHandle;
 use crate::errors::{AMMError, EventLogError};
 
 use super::{
-    uniswap_v2::factory::{UniswapV2Factory, PAIR_CREATED_EVENT_SIGNATURE},
-    uniswap_v3::factory::{UniswapV3Factory, POOL_CREATED_EVENT_SIGNATURE},
+    uniswap_v2::factory::{
+        UniswapV2Factory, PAIR_CREATED_EVENT_SIGNATURE, PAIR_CREATED_EVENT_SIGNATURE_BYTES,
+    },
+    uniswap_v3::factory::{
+        UniswapV3Factory, POOL_CREATED_EVENT_SIGNATURE, POOL_CREATED_EVENT_SIGNATURE_BYTES,
+    },
     AMM,
 };
 
@@ -83,10 +87,11 @@ impl AutomatedMarketMakerFactory for Factory {
         }
     }
 
-    fn new_empty_amm_from_log(&self, log: Log) -> Result<AMM, ethers::abi::Error> {
-        match self {
-            Factory::UniswapV2Factory(factory) => factory.new_empty_amm_from_log(log),
-            Factory::UniswapV3Factory(factory) => factory.new_empty_amm_from_log(log),
+    fn new_empty_amm_from_log(log: Log) -> Result<AMM, ethers::abi::Error> {
+        match log.topics[0].0 {
+            PAIR_CREATED_EVENT_SIGNATURE_BYTES => UniswapV2Factory::new_empty_amm_from_log(log),
+            POOL_CREATED_EVENT_SIGNATURE_BYTES => UniswapV3Factory::new_empty_amm_from_log(log),
+            _ => Err(ethers::abi::Error::InvalidData),
         }
     }
 
@@ -184,7 +189,7 @@ impl Factory {
             .await?;
 
         for log in log_group {
-            aggregated_amms.push(self.new_empty_amm_from_log(log)?);
+            aggregated_amms.push(Factory::new_empty_amm_from_log(log)?);
         }
 
         Ok(aggregated_amms)

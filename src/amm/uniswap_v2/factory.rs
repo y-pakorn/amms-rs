@@ -36,10 +36,11 @@ abigen!(
     ]"#;
 );
 
-pub const PAIR_CREATED_EVENT_SIGNATURE: H256 = H256([
+pub const PAIR_CREATED_EVENT_SIGNATURE: H256 = H256(PAIR_CREATED_EVENT_SIGNATURE_BYTES);
+pub const PAIR_CREATED_EVENT_SIGNATURE_BYTES: [u8; 32] = [
     13, 54, 72, 189, 15, 107, 168, 1, 52, 163, 59, 169, 39, 90, 197, 133, 217, 211, 21, 240, 173,
     131, 85, 205, 222, 253, 227, 26, 250, 40, 208, 233,
-]);
+];
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct UniswapV2Factory {
