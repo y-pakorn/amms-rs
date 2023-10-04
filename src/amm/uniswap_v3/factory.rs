@@ -17,7 +17,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     amm::{
-        factory::{AutomatedMarketMakerFactory, TASK_LIMIT},
+        factory::{AutomatedMarketMakerFactory, TASK_LIMIT, TASK_LIMIT_LOGS},
         AutomatedMarketMaker, AMM,
     },
     constants::{CONSTANT_RETRY, MULTIPROGRESS, SYNC_BAR_STYLE},
@@ -201,7 +201,7 @@ impl UniswapV3Factory {
             from_block += step;
 
             //Here we are limiting the number of green threads that can be spun up to not have the node time out
-            if handles.len() == TASK_LIMIT {
+            if handles.len() == TASK_LIMIT_LOGS {
                 Self::process_logs_from_handles(&mut ordered_logs, handles).await?;
                 handles = JoinSet::new();
             }

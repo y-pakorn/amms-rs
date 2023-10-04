@@ -17,6 +17,7 @@ use super::{
 };
 
 pub const TASK_LIMIT: usize = 25;
+pub const TASK_LIMIT_LOGS: usize = 50;
 
 #[async_trait]
 pub trait AutomatedMarketMakerFactory {

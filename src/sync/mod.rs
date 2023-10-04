@@ -131,17 +131,15 @@ pub async fn populate_amms<M: 'static + Middleware>(
                 for amm_chunk in amms.chunks(step) {
                     let middleware = middleware.clone();
                     let progress = progress.clone();
-                    let amm_chunk = amm_chunk.to_vec();
+                    let mut amm_chunk = amm_chunk.to_vec();
                     handles.spawn(async move {
-                        let requested_chunks =
-                            uniswap_v2::batch_request::get_amm_data_batch_request_optional(
-                                &amm_chunk,
-                                middleware.clone(),
-                            )
-                            .await
-                            .unwrap_or_default();
+                        uniswap_v2::batch_request::get_amm_data_batch_request(
+                            &mut amm_chunk,
+                            middleware.clone(),
+                        )
+                        .await?;
                         progress.inc(amm_chunk.len() as u64);
-                        Ok::<_, AMMError<M>>(requested_chunks)
+                        Ok::<_, AMMError<M>>(amm_chunk)
                     });
 
                     if handles.len() == TASK_LIMIT {
