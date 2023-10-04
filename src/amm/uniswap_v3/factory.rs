@@ -17,7 +17,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     amm::{
-        factory::{AutomatedMarketMakerFactory, TASK_LIMIT, TASK_LIMIT_LOGS},
+        factory::{AutomatedMarketMakerFactory, TASK_LIMIT_LOGS},
         AutomatedMarketMaker, AMM,
     },
     constants::{CONSTANT_RETRY, MULTIPROGRESS, SYNC_BAR_STYLE},
@@ -210,6 +210,14 @@ impl UniswapV3Factory {
 
         Self::process_logs_from_handles(&mut ordered_logs, handles).await?;
 
+        progress.finish_and_clear();
+        let progress = MULTIPROGRESS.add(
+            ProgressBar::new(ordered_logs.len() as u64)
+                .with_style(SYNC_BAR_STYLE.clone())
+                .with_message(format!("Processing all v3 pools from: {}", self.address)),
+        );
+        progress.tick();
+
         for (_, log_group) in ordered_logs {
             for log in log_group {
                 let event_signature = log.topics[0];
@@ -236,6 +244,7 @@ impl UniswapV3Factory {
                     }
                 }
             }
+            progress.inc(1);
         }
 
         progress.finish_and_clear();
