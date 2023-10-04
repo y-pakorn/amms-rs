@@ -245,7 +245,7 @@ impl UniswapV3Factory {
                             Ok::<AMM, AMMError<M>>(new_pool)
                         });
 
-                        if handles.len() == TASK_LIMIT * 2 {
+                        if handles.len() == TASK_LIMIT * 4 {
                             Self::process_amms_from_handles(&mut aggregated_amms, handles).await?;
                             handles = JoinSet::new();
                         }
