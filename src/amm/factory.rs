@@ -17,7 +17,7 @@ use super::{
 };
 
 pub const TASK_LIMIT: usize = 25;
-pub const TASK_LIMIT_LOGS: usize = 50;
+pub const TASK_LIMIT_LOGS: usize = 10;
 
 #[async_trait]
 pub trait AutomatedMarketMakerFactory {
@@ -171,7 +171,7 @@ impl Factory {
 
             from_block += step;
             tasks += 1;
-            if tasks == TASK_LIMIT {
+            if tasks == TASK_LIMIT_LOGS {
                 self.process_logs_from_handles(handles, &mut log_group)
                     .await?;
 
