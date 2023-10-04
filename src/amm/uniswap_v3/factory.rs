@@ -24,7 +24,10 @@ use crate::{
     errors::{AMMError, EventLogError},
 };
 
-use super::{batch_request, UniswapV3Pool, BURN_EVENT_SIGNATURE, MINT_EVENT_SIGNATURE};
+use super::{
+    batch_request, UniswapV3Pool, BURN_EVENT_SIGNATURE, BURN_EVENT_SIGNATURE_BYTES,
+    MINT_EVENT_SIGNATURE, MINT_EVENT_SIGNATURE_BYTES,
+};
 
 abigen!(
     IUniswapV3Factory,
@@ -36,10 +39,11 @@ abigen!(
         ]"#;
 );
 
-pub const POOL_CREATED_EVENT_SIGNATURE: H256 = H256([
+pub const POOL_CREATED_EVENT_SIGNATURE: H256 = H256(POOL_CREATED_EVENT_SIGNATURE_BYTES);
+pub const POOL_CREATED_EVENT_SIGNATURE_BYTES: [u8; 32] = [
     120, 60, 202, 28, 4, 18, 221, 13, 105, 94, 120, 69, 104, 201, 109, 162, 233, 194, 47, 249, 137,
     53, 122, 46, 139, 29, 155, 43, 78, 107, 113, 24,
-]);
+];
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct UniswapV3Factory {
@@ -185,6 +189,9 @@ impl UniswapV3Factory {
                                     BURN_EVENT_SIGNATURE,
                                     MINT_EVENT_SIGNATURE,
                                 ])
+                                // TODO: find a way to index burn and mint faster and remove line
+                                // below
+                                .address(self.address)
                                 .from_block(BlockNumber::Number(U64([from_block])))
                                 .to_block(BlockNumber::Number(U64([target_block]))),
                         )
@@ -223,8 +230,8 @@ impl UniswapV3Factory {
                 let event_signature = log.topics[0];
 
                 //If the event sig is the pool created event sig, then the log is coming from the factory
-                if event_signature == POOL_CREATED_EVENT_SIGNATURE {
-                    if log.address == self.address {
+                match (event_signature.0, log.address == self.address) {
+                    (POOL_CREATED_EVENT_SIGNATURE_BYTES, true) => {
                         let mut new_pool = self.new_empty_amm_from_log(log)?;
 
                         if let AMM::UniswapV3Pool(ref mut pool) = new_pool {
@@ -233,16 +240,22 @@ impl UniswapV3Factory {
 
                         aggregated_amms.insert(new_pool.address(), new_pool);
                     }
-                } else if event_signature == BURN_EVENT_SIGNATURE {
-                    //If the event sig is the BURN_EVENT_SIGNATURE log is coming from the pool
-                    if let Some(AMM::UniswapV3Pool(pool)) = aggregated_amms.get_mut(&log.address) {
-                        pool.sync_from_burn_log(log)?;
+                    (BURN_EVENT_SIGNATURE_BYTES, _) => {
+                        if let Some(AMM::UniswapV3Pool(pool)) =
+                            aggregated_amms.get_mut(&log.address)
+                        {
+                            pool.sync_from_burn_log(log)?;
+                        }
                     }
-                } else if event_signature == MINT_EVENT_SIGNATURE {
-                    if let Some(AMM::UniswapV3Pool(pool)) = aggregated_amms.get_mut(&log.address) {
-                        pool.sync_from_mint_log(log)?;
+                    (MINT_EVENT_SIGNATURE_BYTES, _) => {
+                        if let Some(AMM::UniswapV3Pool(pool)) =
+                            aggregated_amms.get_mut(&log.address)
+                        {
+                            pool.sync_from_mint_log(log)?;
+                        }
                     }
-                }
+                    _ => {}
+                };
             }
             progress.inc(1);
         }

@@ -70,16 +70,18 @@ pub const SWAP_EVENT_SIGNATURE: H256 = H256([
 ]);
 
 // Burn event signature
-pub const BURN_EVENT_SIGNATURE: H256 = H256([
+pub const BURN_EVENT_SIGNATURE: H256 = H256(BURN_EVENT_SIGNATURE_BYTES);
+pub const BURN_EVENT_SIGNATURE_BYTES: [u8; 32] = [
     12, 57, 108, 217, 137, 163, 159, 68, 89, 181, 250, 26, 237, 106, 154, 141, 205, 188, 69, 144,
     138, 207, 214, 126, 2, 140, 213, 104, 218, 152, 152, 44,
-]);
+];
 
 // Mint event signature
-pub const MINT_EVENT_SIGNATURE: H256 = H256([
+pub const MINT_EVENT_SIGNATURE: H256 = H256(MINT_EVENT_SIGNATURE_BYTES);
+pub const MINT_EVENT_SIGNATURE_BYTES: [u8; 32] = [
     122, 83, 8, 11, 164, 20, 21, 139, 231, 236, 105, 185, 135, 181, 251, 125, 7, 222, 225, 1, 254,
     133, 72, 143, 8, 83, 174, 22, 35, 157, 11, 222,
-]);
+];
 
 pub const U256_TWO: U256 = U256([2, 0, 0, 0]);
 pub const Q128: U256 = U256([0, 0, 1, 0]);
